@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bouclier Dourga</title>
+<style>
+body{font-family:sans-serif;margin:0;padding:16px;background:#0b1f2a;color:#fff}
+h1{color:#4ade80;font-size:22px}
+.card{background:#12303f;border-radius:12px;padding:14px;margin-bottom:14px}
+button{padding:14px;font-size:17px;border:0;border-radius:10px;background:#4ade80;color:#0b1f2a;width:100%}
+button.off{background:#f87171}
+input[type=text]{width:100%;box-sizing:border-box;padding:10px;font-size:16px;border-radius:8px;border:0;margin-bottom:10px}
+label{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid #1d4256}
+a{color:#4ade80}
+small{color:#a7c4d1}
+</style>
+</head>
+<body>
+<p><a href="./">← Retour</a></p>
+<h1>🛡️ Bouclier Dourga</h1>
+<div id="msg" class="card" style="display:none"></div>
+<div id="main" style="display:none">
+  <div class="card">
+    <p id="status"></p>
+    <button id="toggle"></button>
+    <p><small>Les applications cochées n'ont plus accès à Internet tant que le bouclier est actif. Les autres fonctionnent normalement.</small></p>
+  </div>
+  <div class="card">
+    <input type="text" id="search" placeholder="Chercher une application">
+    <div id="list"></div>
+  </div>
+</div>
+<script>
+var N = window.DourgaNative;
+var blocked = [];
+var apps = [];
+
+function say(t){
+  var m = document.getElementById('msg');
+  m.textContent = t;
+  m.style.display = t ? 'block' : 'none';
+}
+function isActive(){
+  try { return N.isShieldActive(); } catch(e) { return false; }
+}
+function render(){
+  var a = isActive();
+  document.getElementById('status').textContent = a
+    ? 'Bouclier actif : ' + blocked.length + ' application(s) bloquée(s).'
+    : 'Bouclier désactivé.';
+  var t = document.getElementById('toggle');
+  t.textContent = a ? 'Désactiver le bouclier' : 'Activer le bouclier';
+  t.className = a ? 'off' : '';
+}
+function save(){
+  N.setBlockedApps(JSON.stringify(blocked));
+  render();
+}
+function drawList(){
+  var q = document.getElementById('search').value.toLowerCase();
+  var list = document.getElementById('list');
+  list.innerHTML = '';
+  apps.forEach(function(app){
+    if (q && app.name.toLowerCase().indexOf(q) < 0) return;
+    var l = document.createElement('label');
+    var c = document.createElement('input');
+    c.type = 'checkbox';
+    c.checked = blocked.indexOf(app.pkg) >= 0;
+    c.onchange = function(){
+      if (c.checked) {
+        if (blocked.indexOf(app.pkg) < 0) blocked.push(app.pkg);
+      } else {
+        blocked = blocked.filter(function(p){ return p !== app.pkg; });
+      }
+      save();
+    };
+    var s = document.createElement('span');
+    s.textContent = app.name;
+    l.appendChild(c);
+    l.appendChild(s);
+    list.appendChild(l);
+  });
+}
+
+if (!N) {
+  say("Le bouclier fonctionne uniquement dans l'application Android Dourga Data.");
+} else {
+  document.getElementById('main').style.display = 'block';
+  apps = JSON.parse(N.getInstalledApps());
+  blocked = JSON.parse(N.getBlockedApps());
+  window.onShieldChanged = function(){ render(); };
+  document.getElementById('search').oninput = drawList;
+  document.getElementById('toggle').onclick = function(){
+    if (isActive()) {
+      N.stopShield();
+    } else if (blocked.length === 0) {
+      say('Cochez au moins une application à bloquer.');
+    } else {
+      say('');
+      N.startShield();
+    }
+  };
+  drawList();
+  render();
+}
+</script>
+</body>
+</html>
