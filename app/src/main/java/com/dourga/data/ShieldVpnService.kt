@@ -1,3 +1,4 @@
+
 package com.dourga.data
 
 import android.app.Notification
@@ -10,6 +11,9 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.PowerManager
 import java.io.FileInputStream
@@ -24,24 +28,100 @@ class ShieldVpnService : VpnService() {
     @Volatile private var running = false
     private var screenReceiver: BroadcastReceiver? = null
     private var currentKey: String = ""
+    @Volatile private var stoppedByApp = false
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putLong(KEY_ALIVE, System.currentTimeMillis()).apply()
+            handler.postDelayed(this, 60000L)
+        }
+    }
 
     private fun log(message: String) = appendLog(this, message)
 
     override fun onCreate() {
         super.onCreate()
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val wasActive = prefs.getBoolean(KEY_ACTIVE, false)
+        val lastAlive = prefs.getLong(KEY_ALIVE, 0L)
         log("Service cree")
+        if (wasActive) {
+            val t = if (lastAlive > 0L) {
+                SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(lastAlive))
+            } else {
+                "inconnu"
+            }
+            log("ALERTE : service precedent arrete sans prevenir (dernier signe de vie : " + t + ")")
+        }
+        log("Batterie : " + batteryInfo())
+        installCrashLogger()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? {
+        log("Liaison demandee : " + (intent?.action ?: "aucune"))
+        return super.onBind(intent)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        log("Commande recue : " + (intent?.action ?: "demarrage"))
+        log(
+            "Commande recue : " +
+                (if (intent == null) "REDEMARRAGE par Android" else (intent.action ?: "demarrage"))
+        )
         if (intent?.action == ACTION_STOP) {
             stopShield("arret demande")
             return START_NOT_STICKY
         }
         goForeground()
+        startHeartbeat()
         registerScreenReceiver()
         applyState()
         return START_STICKY
+    }
+
+    private fun startHeartbeat() {
+        handler.removeCallbacks(heartbeat)
+        handler.post(heartbeat)
+    }
+
+    private fun stopHeartbeat() {
+        handler.removeCallbacks(heartbeat)
+    }
+
+    private fun batteryInfo(): String {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                if (pm.isIgnoringBatteryOptimizations(packageName)) {
+                    "non optimisee (bon)"
+                } else {
+                    "OPTIMISEE (Android peut couper)"
+                }
+            } else {
+                "non applicable"
+            }
+        } catch (e: Exception) {
+            "inconnu"
+        }
+    }
+
+    private fun installCrashLogger() {
+        if (crashLoggerInstalled) return
+        crashLoggerInstalled = true
+        val appCtx = applicationContext
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            try {
+                appendLog(
+                    appCtx,
+                    "PLANTAGE : " + error.javaClass.simpleName + " " + (error.message ?: ""),
+                    true
+                )
+            } catch (e: Exception) {
+            }
+            previous?.uncaughtException(thread, error)
+        }
     }
 
     private fun goForeground() {
@@ -172,121 +252,4 @@ class ShieldVpnService : VpnService() {
         var added = 0
         for (pkg in wanted) {
             try {
-                builder.addAllowedApplication(pkg)
-                added++
-            } catch (e: Exception) {
-            }
-        }
-        log("Applis dans le tunnel : " + added)
-        if (added == 0) {
-            log("Aucune des applications visees n'est installee")
-            return
-        }
-
-        val fd = try {
-            builder.establish()
-        } catch (e: Exception) {
-            log("Erreur ouverture : " + e.javaClass.simpleName)
-            null
-        }
-        if (fd == null) {
-            log("Android a refuse d'ouvrir le tunnel")
-            return
-        }
-
-        tunnel = fd
-        running = true
-        log("Tunnel ouvert")
-
-        val input = FileInputStream(fd.fileDescriptor)
-        reader = Thread {
-            val buf = ByteArray(32767)
-            try {
-                while (running) {
-                    if (input.read(buf) < 0) break
-                }
-            } catch (e: Exception) {
-            }
-        }
-        reader?.start()
-    }
-
-    private fun closeTunnel() {
-        running = false
-        try {
-            tunnel?.close()
-        } catch (e: Exception) {
-        }
-        tunnel = null
-        reader = null
-    }
-
-    private fun stopShield(reason: String) {
-        log("Arret : " + reason)
-        unregisterScreenReceiver()
-        closeTunnel()
-        active = false
-        currentKey = ""
-        getSharedPreferences(PREFS, MODE_PRIVATE)
-            .edit().putBoolean(KEY_ACTIVE, false).apply()
-        try {
-            stopForeground(true)
-        } catch (e: Exception) {
-        }
-        stopSelf()
-    }
-
-    override fun onRevoke() {
-        stopShield("autre VPN ou autorisation retiree")
-    }
-
-    override fun onDestroy() {
-        log("Service detruit")
-        unregisterScreenReceiver()
-        closeTunnel()
-        active = false
-        getSharedPreferences(PREFS, MODE_PRIVATE)
-            .edit().putBoolean(KEY_ACTIVE, false).apply()
-        super.onDestroy()
-    }
-
-    companion object {
-        const val ACTION_STOP = "com.dourga.data.STOP_SHIELD"
-        const val PREFS = "dourga_shield"
-        const val KEY_BLOCKED = "blocked_apps"
-        const val KEY_ACTIVE = "shield_active"
-        const val KEY_LOG = "shield_log"
-        const val CHANNEL_ID = "dourga_protection"
-        const val NOTIF_ID = 4201
-
-        val AUTO_APPS = listOf(
-            "com.facebook.katana",
-            "com.facebook.lite",
-            "com.instagram.android",
-            "com.google.android.youtube",
-            "com.zhiliaoapp.musically",
-            "com.ss.android.ugc.trill",
-            "com.zhiliaoapp.musically.go",
-            "com.snapchat.android",
-            "com.netflix.mediaclient",
-            "com.twitter.android"
-        )
-
-        val AUTO_LABELS = listOf(
-            "CapCut",
-            "FRANCE 24"
-        )
-
-        @Volatile
-        var active = false
-
-        fun appendLog(ctx: Context, message: String) {
-            val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
-            val old = prefs.getString(KEY_LOG, "") ?: ""
-            val lines = (old.split("\n").filter { it.isNotEmpty() } + (time + " " + message))
-                .takeLast(15)
-            prefs.edit().putString(KEY_LOG, lines.joinToString("\n")).apply()
-        }
-    }
-}
+                builder.addAllowedAppl
