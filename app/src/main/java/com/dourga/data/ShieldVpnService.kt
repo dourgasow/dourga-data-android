@@ -19,6 +19,7 @@ import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 
 class ShieldVpnService : VpnService() {
 
@@ -29,12 +30,56 @@ class ShieldVpnService : VpnService() {
     private var currentKey: String = ""
     @Volatile private var stoppedByApp = false
 
+    private var shaperRunning = false
+    private var shaperChoking = false
+    private var shaperCycles = 0
+    private var manualPkgs: Set<String> = emptySet()
+    private var shapePkgs: Set<String> = emptySet()
+
+    private val tcpCount = AtomicInteger(0)
+    private val udpCount = AtomicInteger(0)
+    private val otherCount = AtomicInteger(0)
+    private val activeReaders = AtomicInteger(0)
+
     private val handler = Handler(Looper.getMainLooper())
+
     private val heartbeat = object : Runnable {
         override fun run() {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putLong(KEY_ALIVE, System.currentTimeMillis()).apply()
             handler.postDelayed(this, 60000L)
+        }
+    }
+
+    private val statsLogger = object : Runnable {
+        override fun run() {
+            val tcp = tcpCount.getAndSet(0)
+            val udp = udpCount.getAndSet(0)
+            val autre = otherCount.getAndSet(0)
+            if (tcp + udp + autre > 0) {
+                log(
+                    "Paquets coupes : TCP " + tcp + ", UDP " + udp + ", autres " + autre +
+                        (if (shaperRunning) ", cycles " + shaperCycles else "") +
+                        ", lecteurs " + activeReaders.get()
+                )
+            }
+            handler.postDelayed(this, 10000L)
+        }
+    }
+
+    private val shaperTick = object : Runnable {
+        override fun run() {
+            if (!shaperRunning) return
+            if (shaperChoking) {
+                shaperChoking = false
+                shaperCycles++
+                buildTunnel(manualPkgs, true)
+                handler.postDelayed(this, OPEN_MS)
+            } else {
+                shaperChoking = true
+                buildTunnel(manualPkgs + shapePkgs, true)
+                handler.postDelayed(this, CHOKE_MS)
+            }
         }
     }
 
@@ -82,10 +127,13 @@ class ShieldVpnService : VpnService() {
     private fun startHeartbeat() {
         handler.removeCallbacks(heartbeat)
         handler.post(heartbeat)
+        handler.removeCallbacks(statsLogger)
+        handler.postDelayed(statsLogger, 10000L)
     }
 
     private fun stopHeartbeat() {
         handler.removeCallbacks(heartbeat)
+        handler.removeCallbacks(statsLogger)
     }
 
     private fun batteryInfo(): String {
@@ -197,6 +245,15 @@ class ShieldVpnService : VpnService() {
         return pm.isInteractive
     }
 
+    private fun isInstalled(pkg: String): Boolean {
+        return try {
+            packageManager.getApplicationInfo(pkg, 0)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private fun resolveByLabel(): Set<String> {
         val result = HashSet<String>()
         try {
@@ -215,18 +272,62 @@ class ShieldVpnService : VpnService() {
 
     private fun applyState() {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        val manual = prefs.getStringSet(KEY_BLOCKED, emptySet()) ?: emptySet()
+        val manual = HashSet<String>(prefs.getStringSet(KEY_BLOCKED, emptySet()) ?: emptySet())
+        manual.remove(packageName)
         val screenOn = isScreenOn()
-        val wanted = HashSet<String>(manual)
+
         if (!screenOn) {
+            stopShaper()
+            val wanted = HashSet<String>(manual)
             wanted.addAll(AUTO_APPS)
             wanted.addAll(resolveByLabel())
+            wanted.remove(packageName)
+            val key = "off:" + wanted.sorted().joinToString(",")
+            log("Ecran eteint, applis visees : " + wanted.size)
+            if (key == currentKey && tunnel != null) return
+            openTunnel(wanted, key)
+        } else {
+            val shape = HashSet<String>()
+            for (pkg in SHAPE_APPS) {
+                if (isInstalled(pkg)) shape.add(pkg)
+            }
+            shape.remove(packageName)
+            val key = "on:" + manual.sorted().joinToString(",") + "|" +
+                shape.sorted().joinToString(",")
+            log("Ecran allume, applis limitees : " + shape.size + ", coupees : " + manual.size)
+            if (key == currentKey && (shaperRunning || tunnel != null)) return
+            if (shape.isEmpty()) {
+                stopShaper()
+                openTunnel(manual, key)
+            } else {
+                startShaper(manual, shape, key)
+            }
         }
-        wanted.remove(packageName)
-        val key = wanted.sorted().joinToString(",")
-        log("Ecran " + (if (screenOn) "allume" else "eteint") + ", applis visees : " + wanted.size)
-        if (key == currentKey && tunnel != null) return
-        openTunnel(wanted, key)
+    }
+
+    private fun startShaper(manual: Set<String>, shape: Set<String>, key: String) {
+        stopShaper()
+        closeTunnel()
+        currentKey = key
+        active = true
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+            .edit().putBoolean(KEY_ACTIVE, true).apply()
+        manualPkgs = manual
+        shapePkgs = shape
+        shaperCycles = 0
+        shaperChoking = false
+        shaperRunning = true
+        log("Shaper actif : ouvert " + OPEN_MS + " ms, coupe " + CHOKE_MS + " ms")
+        buildTunnel(manualPkgs, true)
+        handler.postDelayed(shaperTick, OPEN_MS)
+    }
+
+    private fun stopShaper() {
+        if (shaperRunning) {
+            log("Shaper arrete apres " + shaperCycles + " cycles")
+        }
+        shaperRunning = false
+        handler.removeCallbacks(shaperTick)
     }
 
     private fun openTunnel(wanted: Set<String>, key: String) {
@@ -240,6 +341,12 @@ class ShieldVpnService : VpnService() {
             log("Aucune application a couper pour le moment")
             return
         }
+        buildTunnel(wanted, false)
+    }
+
+    private fun buildTunnel(pkgs: Set<String>, quiet: Boolean): Boolean {
+        closeTunnel()
+        if (pkgs.isEmpty()) return false
 
         val builder = Builder()
             .setSession("Dourga Bouclier")
@@ -249,41 +356,38 @@ class ShieldVpnService : VpnService() {
             .addRoute("::", 0)
 
         var added = 0
-        for (pkg in wanted) {
+        for (pkg in pkgs) {
             try {
                 builder.addAllowedApplication(pkg)
                 added++
             } catch (e: Exception) {
             }
         }
-        log("Applis dans le tunnel : " + added)
+        if (!quiet) log("Applis dans le tunnel : " + added)
         if (added == 0) {
-            log("Aucune des applications visees n'est installee")
-            return
+            if (!quiet) log("Aucune des applications visees n'est installee")
+            return false
         }
 
         val fd = try {
             builder.establish()
         } catch (e: Exception) {
-            log("Erreur ouverture : " + e.javaClass.simpleName)
+            if (!quiet) log("Erreur ouverture : " + e.javaClass.simpleName)
             null
         }
         if (fd == null) {
-            log("Android a refuse d'ouvrir le tunnel")
-            return
+            if (!quiet) log("Android a refuse d'ouvrir le tunnel")
+            return false
         }
 
         tunnel = fd
         running = true
-        log("Tunnel ouvert")
+        if (!quiet) log("Tunnel ouvert")
 
         val input = FileInputStream(fd.fileDescriptor)
-        reader = Thread {
+        val thread = Thread {
+            activeReaders.incrementAndGet()
             val buf = ByteArray(32767)
-            var tcp = 0
-            var udp = 0
-            var autre = 0
-            var dernierLog = System.currentTimeMillis()
             try {
                 while (running) {
                     val n = input.read(buf)
@@ -296,23 +400,19 @@ class ShieldVpnService : VpnService() {
                         else -> -1
                     }
                     when (proto) {
-                        6 -> tcp++
-                        17 -> udp++
-                        else -> autre++
-                    }
-                    val now = System.currentTimeMillis()
-                    if (now - dernierLog >= 10000L) {
-                        log("Paquets vus : TCP " + tcp + ", UDP " + udp + ", autres " + autre)
-                        tcp = 0
-                        udp = 0
-                        autre = 0
-                        dernierLog = now
+                        6 -> tcpCount.incrementAndGet()
+                        17 -> udpCount.incrementAndGet()
+                        else -> otherCount.incrementAndGet()
                     }
                 }
             } catch (e: Exception) {
+            } finally {
+                activeReaders.decrementAndGet()
             }
         }
-        reader?.start()
+        reader = thread
+        thread.start()
+        return true
     }
 
     private fun closeTunnel() {
@@ -328,6 +428,7 @@ class ShieldVpnService : VpnService() {
     private fun stopShield(reason: String) {
         stoppedByApp = true
         log("Arret : " + reason)
+        stopShaper()
         stopHeartbeat()
         unregisterScreenReceiver()
         closeTunnel()
@@ -360,6 +461,7 @@ class ShieldVpnService : VpnService() {
 
     override fun onDestroy() {
         log("Service detruit" + (if (stoppedByApp) "" else " SANS demande de l'appli"))
+        stopShaper()
         stopHeartbeat()
         unregisterScreenReceiver()
         closeTunnel()
@@ -378,6 +480,13 @@ class ShieldVpnService : VpnService() {
         const val KEY_ALIVE = "shield_last_alive"
         const val CHANNEL_ID = "dourga_protection"
         const val NOTIF_ID = 4201
+
+        const val OPEN_MS = 350L
+        const val CHOKE_MS = 150L
+
+        val SHAPE_APPS = listOf(
+            "com.facebook.katana"
+        )
 
         val AUTO_APPS = listOf(
             "com.facebook.katana",
