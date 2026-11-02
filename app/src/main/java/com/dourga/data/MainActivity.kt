@@ -31,12 +31,6 @@ class MainActivity : AppCompatActivity() {
           a.textContent = '🛡️';
           a.style.cssText = 'position:fixed;right:14px;bottom:90px;width:54px;height:54px;border-radius:27px;background:#4ade80;color:#0b1f2a;font-size:26px;display:flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:99999';
           document.body.appendChild(a);
-          var b = document.createElement('div');
-          b.id = 'dourga-browser-btn';
-          b.textContent = '🌐';
-          b.style.cssText = 'position:fixed;right:14px;bottom:158px;width:54px;height:54px;border-radius:27px;background:#60a5fa;color:#0b1f2a;font-size:26px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);z-index:99999';
-          b.onclick = function(){ if (window.DourgaNative) { DourgaNative.openBrowser(); } };
-          document.body.appendChild(b);
         })();
     """
 
@@ -123,14 +117,6 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun isShieldActive(): Boolean = ShieldVpnService.active
-
-        @JavascriptInterface
-        fun openBrowser() {
-            runOnUiThread {
-                log("Ouverture du navigateur economique")
-                startActivity(Intent(this@MainActivity, BrowserActivity::class.java))
-            }
-        }
 
         @JavascriptInterface
         fun getShieldLog(): String =
