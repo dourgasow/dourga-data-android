@@ -1,3 +1,4 @@
+
 package com.dourga.data
 
 import android.app.Notification
@@ -481,8 +482,8 @@ class ShieldVpnService : VpnService() {
         const val CHANNEL_ID = "dourga_protection"
         const val NOTIF_ID = 4201
 
-        const val OPEN_MS = 350L
-        const val CHOKE_MS = 150L
+        const val OPEN_MS = 200L
+        const val CHOKE_MS = 200L
 
         val SHAPE_APPS = listOf(
             "com.facebook.katana"
