@@ -1,4 +1,3 @@
-
 package com.dourga.data
 
 import android.app.Notification
@@ -468,63 +467,4 @@ class ShieldVpnService : VpnService() {
         closeTunnel()
         active = false
         getSharedPreferences(PREFS, MODE_PRIVATE)
-            .edit().putBoolean(KEY_ACTIVE, false).apply()
-        super.onDestroy()
-    }
-
-    companion object {
-        const val ACTION_STOP = "com.dourga.data.STOP_SHIELD"
-        const val PREFS = "dourga_shield"
-        const val KEY_BLOCKED = "blocked_apps"
-        const val KEY_ACTIVE = "shield_active"
-        const val KEY_LOG = "shield_log"
-        const val KEY_ALIVE = "shield_last_alive"
-        const val CHANNEL_ID = "dourga_protection"
-        const val NOTIF_ID = 4201
-
-        const val OPEN_MS = 200L
-        const val CHOKE_MS = 200L
-
-        val SHAPE_APPS = listOf(
-            "com.facebook.katana"
-        )
-
-        val AUTO_APPS = listOf(
-            "com.facebook.katana",
-            "com.facebook.lite",
-            "com.instagram.android",
-            "com.google.android.youtube",
-            "com.zhiliaoapp.musically",
-            "com.ss.android.ugc.trill",
-            "com.zhiliaoapp.musically.go",
-            "com.snapchat.android",
-            "com.netflix.mediaclient",
-            "com.twitter.android"
-        )
-
-        val AUTO_LABELS = listOf(
-            "CapCut",
-            "FRANCE 24"
-        )
-
-        @Volatile
-        var active = false
-
-        @Volatile
-        private var crashLoggerInstalled = false
-
-        fun appendLog(ctx: Context, message: String, sync: Boolean = false) {
-            val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            val time = SimpleDateFormat("dd/MM HH:mm:ss", Locale.US).format(Date())
-            val old = prefs.getString(KEY_LOG, "") ?: ""
-            val lines = (old.split("\n").filter { it.isNotEmpty() } + (time + " " + message))
-                .takeLast(120)
-            val editor = prefs.edit().putString(KEY_LOG, lines.joinToString("\n"))
-            if (sync) {
-                editor.commit()
-            } else {
-                editor.apply()
-            }
-        }
-    }
-}
+            .edit().putBoolean(KEY_ACT
