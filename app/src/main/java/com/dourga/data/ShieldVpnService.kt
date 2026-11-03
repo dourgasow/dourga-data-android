@@ -38,6 +38,7 @@ class ShieldVpnService : VpnService() {
 
     private val tcpCount = AtomicInteger(0)
     private val udpCount = AtomicInteger(0)
+    private val udp443Count = AtomicInteger(0)
     private val otherCount = AtomicInteger(0)
     private val activeReaders = AtomicInteger(0)
 
@@ -55,10 +56,12 @@ class ShieldVpnService : VpnService() {
         override fun run() {
             val tcp = tcpCount.getAndSet(0)
             val udp = udpCount.getAndSet(0)
+            val udp443 = udp443Count.getAndSet(0)
             val autre = otherCount.getAndSet(0)
             if (tcp + udp + autre > 0) {
                 log(
-                    "Paquets coupes : TCP " + tcp + ", UDP " + udp + ", autres " + autre +
+                    "Paquets coupes : TCP " + tcp + ", UDP " + udp +
+                        " (dont port 443 : " + udp443 + "), autres " + autre +
                         (if (shaperRunning) ", cycles " + shaperCycles else "") +
                         ", lecteurs " + activeReaders.get()
                 )
@@ -401,7 +404,16 @@ class ShieldVpnService : VpnService() {
                     }
                     when (proto) {
                         6 -> tcpCount.incrementAndGet()
-                        17 -> udpCount.incrementAndGet()
+                        17 -> {
+                            udpCount.incrementAndGet()
+                            // Diagnostic : compte les UDP vers le port 443 (QUIC / HTTP3)
+                            val ihl = if (version == 4) (buf[0].toInt() and 0x0F) * 4 else 40
+                            if (n >= ihl + 4) {
+                                val dstPort = ((buf[ihl + 2].toInt() and 0xFF) shl 8) or
+                                    (buf[ihl + 3].toInt() and 0xFF)
+                                if (dstPort == 443) udp443Count.incrementAndGet()
+                            }
+                        }
                         else -> otherCount.incrementAndGet()
                     }
                 }
