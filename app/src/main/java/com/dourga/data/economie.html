@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Réglages d’économie</title>
+<style>
+  :root { --bg:#0b1f2a; --card:#12303f; --text:#e6f1f5; --muted:#9fb7c2; --accent:#4ade80; --line:#1d4558; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px 16px 40px; background:var(--bg); color:var(--text);
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; line-height:1.45; }
+  a.back { color:var(--accent); text-decoration:none; font-size:15px; }
+  h1 { font-size:22px; margin:14px 0 6px; }
+  p.intro { color:var(--muted); margin:0 0 14px; font-size:15px; }
+  .progress { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 14px; margin-bottom:14px; font-size:15px; }
+  .step { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  .step.done { border-color:var(--accent); }
+  .step h2 { font-size:17px; margin:0 0 6px; }
+  .step ol { margin:6px 0 10px 18px; padding:0; font-size:15px; }
+  .step li { margin-bottom:3px; }
+  .why { color:var(--muted); font-size:14px; margin:0 0 8px; }
+  button { font:inherit; border:0; border-radius:10px; padding:11px 14px; margin:4px 6px 4px 0; cursor:pointer; }
+  button.main { background:var(--accent); color:#0b1f2a; font-weight:600; }
+  button.alt { background:transparent; color:var(--text); border:1px solid var(--line); }
+  label.check { display:flex; align-items:center; gap:10px; margin-top:10px; font-size:15px; }
+  label.check input { width:22px; height:22px; accent-color:var(--accent); }
+  .note { color:var(--muted); font-size:13px; margin-top:16px; }
+  #msg { color:#fbbf24; font-size:14px; margin:6px 0 0; min-height:18px; }
+</style>
+</head>
+<body>
+  <a class="back" href="#" onclick="history.back();return false;">← Retour</a>
+  <h1 id="title" onclick="tapTitle()">Réglages d’économie Facebook</h1>
+  <p class="intro">Trois réglages à faire une seule fois. Ils empêchent Facebook de télécharger des vidéos que vous ne regardez pas.</p>
+
+  <div class="progress" id="progress">0 sur 3 réglages faits</div>
+
+  <div class="step" id="s1">
+    <h2>1. Arrêter la lecture automatique</h2>
+    <p class="why">Sans ce réglage, les vidéos se téléchargent toutes seules quand vous faites défiler le fil.</p>
+    <ol>
+      <li>Ouvrez Facebook, puis le menu (les trois traits).</li>
+      <li>Paramètres et confidentialité, puis Paramètres.</li>
+      <li>Préférences, puis Média.</li>
+      <li>Dans Lecture automatique, choisissez l’option « jamais » (ne jamais lancer les vidéos automatiquement).</li>
+    </ol>
+    <button class="main" onclick="openFb()">Ouvrir Facebook</button>
+    <label class="check"><input type="checkbox" data-step="s1" onchange="toggle(this)"> C’est fait</label>
+  </div>
+
+  <div class="step" id="s2">
+    <h2>2. Activer l’économiseur de données</h2>
+    <p class="why">Facebook affiche alors les vidéos dans une qualité plus légère.</p>
+    <ol>
+      <li>Au même endroit : Paramètres, Préférences, Média.</li>
+      <li>Dans Qualité vidéo, choisissez « Économiseur de données ».</li>
+    </ol>
+    <button class="main" onclick="openFb()">Ouvrir Facebook</button>
+    <label class="check"><input type="checkbox" data-step="s2" onchange="toggle(this)"> C’est fait</label>
+  </div>
+
+  <div class="step" id="s3">
+    <h2>3. Couper les données en arrière-plan</h2>
+    <p class="why">Facebook ne télécharge plus rien quand vous ne l’utilisez pas.</p>
+    <ol>
+      <li>Appuyez sur le bouton ci-dessous : les informations de l’application Facebook s’ouvrent.</li>
+      <li>Cherchez « Données mobiles » ou « Utilisation des données ».</li>
+      <li>Désactivez les données en arrière-plan.</li>
+    </ol>
+    <button class="main" onclick="openFbSettings()">Ouvrir les réglages de Facebook</button>
+    <label class="check"><input type="checkbox" data-step="s3" onchange="toggle(this)"> C’est fait</label>
+  </div>
+
+  <p id="msg"></p>
+  <p class="note">Les noms des menus peuvent changer un peu selon la version de Facebook et le modèle de téléphone. Les économies dépendent de votre usage : elles ne sont pas garanties.</p>
+
+  <div class="step" id="dev" style="display:none">
+    <h2>Test technique : sonde DNS</h2>
+    <p class="why">Réservé aux essais. La sonde note les noms de domaine que Facebook demande. Elle ne bloque rien. Le bouclier est arrêté pendant le test : réactivez-le ensuite.</p>
+    <ol>
+      <li>Appuyez sur « Démarrer la sonde ».</li>
+      <li>Ouvrez Facebook : regardez 3 vidéos, puis faites défiler des photos pendant 3 minutes.</li>
+      <li>Revenez ici, appuyez sur « Arrêter », puis sur « Partager le rapport ».</li>
+    </ol>
+    <p id="probeState" class="why">État : inconnu</p>
+    <button class="main" onclick="probeStart()">Démarrer la sonde</button>
+    <button class="alt" onclick="probeStop()">Arrêter</button>
+    <button class="alt" onclick="probeShow()">Voir le rapport</button>
+    <button class="alt" onclick="probeShare()">Partager le rapport</button>
+    <pre id="probeReport" style="white-space:pre-wrap;font-size:12px;color:var(--muted);max-height:260px;overflow:auto;margin-top:10px"></pre>
+  </div>
+
+<script>
+  var N = window.DourgaNative || null;
+  function has(fn) { return N && typeof N[fn] === 'function'; }
+  function say(t) { document.getElementById('msg').textContent = t || ''; }
+
+  function openFb() {
+    say('');
+    try {
+      if (has('isFacebookInstalled') && !N.isFacebookInstalled()) { say('Facebook n’est pas installé sur ce téléphone.'); return; }
+      if (has('openFacebook')) { if (!N.openFacebook()) say('Impossible d’ouvrir Facebook. Ouvrez-le depuis votre écran d’accueil.'); }
+      else { say('Ouvrez Facebook depuis votre écran d’accueil, puis suivez les étapes.'); }
+    } catch (e) { say('Ouvrez Facebook depuis votre écran d’accueil.'); }
+  }
+
+  function openFbSettings() {
+    say('');
+    try {
+      if (has('openFacebookSystemSettings')) { N.openFacebookSystemSettings(); }
+      else { say('Ouvrez les Paramètres du téléphone, puis Applications, puis Facebook.'); }
+    } catch (e) { say('Ouvrez les Paramètres du téléphone, puis Applications, puis Facebook.'); }
+  }
+
+  var KEY = 'dourga_economie_steps';
+  function load() {
+    try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; }
+  }
+  function save(state) {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+  }
+  function toggle(box) {
+    var state = load();
+    state[box.getAttribute('data-step')] = box.checked;
+    save(state);
+    render(state);
+  }
+  function render(state) {
+    var done = 0;
+    ['s1', 's2', 's3'].forEach(function (id) {
+      var on = !!state[id];
+      if (on) done++;
+      document.getElementById(id).className = 'step' + (on ? ' done' : '');
+      document.querySelector('input[data-step="' + id + '"]').checked = on;
+    });
+    document.getElementById('progress').textContent =
+      done === 3 ? 'Bravo, les 3 réglages sont faits ✅' : done + ' sur 3 réglages faits';
+  }
+  render(load());
+
+  // Section test : visible après 5 appuis sur le titre
+  var taps = 0;
+  function tapTitle() {
+    taps++;
+    if (taps >= 5) { document.getElementById('dev').style.display = 'block'; probeRefresh(); }
+  }
+  function probeRefresh() {
+    var el = document.getElementById('probeState');
+    try {
+      if (!has('isDnsProbeActive')) { el.textContent = 'État : non disponible (mettez l’application à jour)'; return; }
+      el.textContent = N.isDnsProbeActive() ? 'État : sonde en cours' : 'État : sonde arrêtée';
+    } catch (e) { el.textContent = 'État : inconnu'; }
+  }
+  window.onProbeChanged = function () { probeRefresh(); };
+  setInterval(function () {
+    if (document.getElementById('dev').style.display === 'block') probeRefresh();
+  }, 2000);
+  function probeStart() { if (has('startDnsProbe')) N.startDnsProbe(); else say('Mettez l’application à jour.'); }
+  function probeStop() { if (has('stopDnsProbe')) N.stopDnsProbe(); }
+  function probeShow() {
+    if (!has('getDnsProbeReport')) return;
+    document.getElementById('probeReport').textContent = N.getDnsProbeReport() || 'Rapport vide';
+  }
+  function probeShare() { if (has('shareDnsProbeReport')) N.shareDnsProbeReport(); }
+</script>
+</body>
+</html>
