@@ -48,6 +48,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val probePermission = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            log("Sonde : autorisation VPN accordee")
+            launchProbe()
+        } else {
+            log("Sonde : autorisation VPN refusee")
+            notifyProbe()
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -107,13 +119,64 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun launchProbe() {
+        if (ShieldVpnService.active) {
+            log("Sonde : arret du bouclier avant le test")
+            val stop = Intent(this, ShieldVpnService::class.java)
+            stop.action = ShieldVpnService.ACTION_STOP
+            startService(stop)
+        }
+        webView.postDelayed({
+            log("Sonde : demande de demarrage envoyee")
+            startService(Intent(this, DnsProbeService::class.java))
+            webView.postDelayed({ notifyProbe() }, 1000)
+        }, 800)
+    }
+
+    private fun notifyProbe() {
+        val active = DnsProbeService.active
+        webView.evaluateJavascript(
+            "if(window.onProbeChanged){window.onProbeChanged($active)}",
+            null
+        )
+    }
+
     inner class DourgaBridge {
 
         @JavascriptInterface
         fun isNative(): Boolean = true
 
         @JavascriptInterface
-        fun appVersion(): String = "1.3"
+        fun appVersion(): String = "1.4"
+
+        @JavascriptInterface
+        fun isFacebookInstalled(): Boolean = try {
+            packageManager.getApplicationInfo("com.facebook.katana", 0)
+            true
+        } catch (e: Exception) {
+            false
+        }
+
+        @JavascriptInterface
+        fun openFacebook(): Boolean {
+            val intent = packageManager.getLaunchIntentForPackage("com.facebook.katana")
+                ?: return false
+            runOnUiThread { startActivity(intent) }
+            return true
+        }
+
+        @JavascriptInterface
+        fun openFacebookSystemSettings() {
+            runOnUiThread {
+                try {
+                    val i = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    i.data = android.net.Uri.parse("package:com.facebook.katana")
+                    startActivity(i)
+                } catch (e: Exception) {
+                    log("Reglages Facebook impossibles : " + e.javaClass.simpleName)
+                }
+            }
+        }
 
         @JavascriptInterface
         fun isShieldActive(): Boolean = ShieldVpnService.active
@@ -191,6 +254,48 @@ class MainActivity : AppCompatActivity() {
                 stop.action = ShieldVpnService.ACTION_STOP
                 startService(stop)
                 webView.postDelayed({ notifyShield() }, 600)
+            }
+        }
+
+        @JavascriptInterface
+        fun isDnsProbeActive(): Boolean = DnsProbeService.active
+
+        @JavascriptInterface
+        fun startDnsProbe() {
+            runOnUiThread {
+                log("Sonde DNS : bouton demarrer appuye")
+                val request = VpnService.prepare(this@MainActivity)
+                if (request != null) {
+                    probePermission.launch(request)
+                } else {
+                    launchProbe()
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun stopDnsProbe() {
+            runOnUiThread {
+                log("Sonde DNS : bouton arreter appuye")
+                val stop = Intent(this@MainActivity, DnsProbeService::class.java)
+                stop.action = DnsProbeService.ACTION_STOP
+                startService(stop)
+                webView.postDelayed({ notifyProbe() }, 600)
+            }
+        }
+
+        @JavascriptInterface
+        fun getDnsProbeReport(): String =
+            prefs().getString(DnsProbeService.KEY_REPORT, "") ?: ""
+
+        @JavascriptInterface
+        fun shareDnsProbeReport() {
+            runOnUiThread {
+                val text = prefs().getString(DnsProbeService.KEY_REPORT, "") ?: ""
+                val send = Intent(Intent.ACTION_SEND)
+                send.type = "text/plain"
+                send.putExtra(Intent.EXTRA_TEXT, if (text.isEmpty()) "Rapport vide" else text)
+                startActivity(Intent.createChooser(send, "Partager le rapport"))
             }
         }
     }
