@@ -118,9 +118,13 @@ class ShieldVpnService : VpnService() {
                 (if (intent == null) "REDEMARRAGE par Android" else (intent.action ?: "demarrage"))
         )
         if (intent?.action == ACTION_STOP) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(KEY_WANTED, false).apply()
             stopShield("arret demande")
             return START_NOT_STICKY
         }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putBoolean(KEY_WANTED, true).apply()
         goForeground()
         startHeartbeat()
         registerScreenReceiver()
@@ -499,6 +503,8 @@ class ShieldVpnService : VpnService() {
     }
 
     override fun onRevoke() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putBoolean(KEY_WANTED, false).apply()
         stopShield("autre VPN ou autorisation retiree")
         notifyInterrupted()
     }
@@ -534,6 +540,7 @@ class ShieldVpnService : VpnService() {
         const val KEY_ACTIVE = "shield_active"
         const val KEY_LOG = "shield_log"
         const val KEY_ALIVE = "shield_last_alive"
+        const val KEY_WANTED = "shield_wanted"
         const val CHANNEL_ID = "dourga_protection"
         const val NOTIF_ID = 4201
         const val CHANNEL_ALERT_ID = "dourga_alerte"
