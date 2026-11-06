@@ -218,6 +218,21 @@ class ShieldVpnService : VpnService() {
 
     // Alerte envoyee quand un autre VPN prend la place du bouclier.
     private fun notifyInterrupted() {
+        notifyAlert(
+            "Bouclier interrompu",
+            "Une autre application a pris la place. Touchez ici pour reactiver la protection de votre forfait."
+        )
+    }
+
+    private fun clearAlert() {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(NOTIF_ALERT_ID)
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun notifyAlert(title: String, text: String) {
         try {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val builder: Notification.Builder
@@ -240,14 +255,14 @@ class ShieldVpnService : VpnService() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             val notification = builder
-                .setContentTitle("Bouclier interrompu")
-                .setContentText("Une autre application a pris la place. Touchez ici pour reactiver la protection de votre forfait.")
+                .setContentTitle(title)
+                .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentIntent(open)
                 .setAutoCancel(true)
                 .build()
             nm.notify(NOTIF_ALERT_ID, notification)
-            log("Alerte envoyee : bouclier interrompu")
+            log("Alerte envoyee : " + title)
         } catch (e: Exception) {
             log("Alerte impossible : " + e.javaClass.simpleName)
         }
@@ -426,13 +441,24 @@ class ShieldVpnService : VpnService() {
             null
         }
         if (fd == null) {
-            if (!quiet) log("Android a refuse d'ouvrir le tunnel")
+            if (!quiet) {
+                log("Android a refuse d'ouvrir le tunnel")
+                active = false
+                notifyAlert(
+                    "Protection non demarree",
+                    "Android n'a pas autorise la protection. Touchez ici pour la reactiver."
+                )
+            }
             return false
         }
 
         tunnel = fd
         running = true
-        if (!quiet) log("Tunnel ouvert")
+        if (!quiet) {
+            log("Tunnel ouvert")
+            active = true
+            clearAlert()
+        }
 
         val input = FileInputStream(fd.fileDescriptor)
         val thread = Thread {
