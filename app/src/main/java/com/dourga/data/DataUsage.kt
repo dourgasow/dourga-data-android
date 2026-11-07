@@ -14,78 +14,57 @@ import java.util.Calendar
 
 object DataUsage {
 
-    fun hasAccess(context: Context): Boolean {
-        val ops = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = ops.checkOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS,
-            Process.myUid(),
-            context.packageName
-        )
-        return mode == AppOpsManager.MODE_ALLOWED
+    fun hasAccess(c: Context): Boolean {
+        val ops = c.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val m = ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), c.packageName)
+        return m == AppOpsManager.MODE_ALLOWED
     }
 
     fun settingsIntent(): Intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
 
-    fun todayJson(context: Context): String {
-        if (!hasAccess(context)) {
-            return JSONObject().put("access", false).toString()
-        }
-        val manager = context.getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
+    fun todayJson(c: Context): String {
+        if (!hasAccess(c)) return JSONObject().put("access", false).toString()
+        val nsm = c.getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
         val cal = Calendar.getInstance()
         cal.set(Calendar.HOUR_OF_DAY, 0)
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
-        val start = cal.timeInMillis
-        val end = System.currentTimeMillis()
-
         val perUid = HashMap<Int, Long>()
         try {
-            val stats = manager.querySummary(ConnectivityManager.TYPE_MOBILE, null, start, end)
-            val bucket = NetworkStats.Bucket()
-            while (stats.hasNextBucket()) {
-                stats.getNextBucket(bucket)
-                val bytes = bucket.rxBytes + bucket.txBytes
-                perUid[bucket.uid] = (perUid[bucket.uid] ?: 0L) + bytes
+            val st = nsm.querySummary(ConnectivityManager.TYPE_MOBILE, null, cal.timeInMillis, System.currentTimeMillis())
+            val b = NetworkStats.Bucket()
+            while (st.hasNextBucket()) {
+                st.getNextBucket(b)
+                perUid[b.uid] = (perUid[b.uid] ?: 0L) + b.rxBytes + b.txBytes
             }
-            stats.close()
+            st.close()
         } catch (e: Exception) {
-            return JSONObject()
-                .put("access", true)
-                .put("error", e.javaClass.simpleName)
-                .toString()
+            return JSONObject().put("access", true).put("error", e.javaClass.simpleName).toString()
         }
-
-        val pm = context.packageManager
+        val pm = c.packageManager
         val perApp = HashMap<String, Pair<String, Long>>()
         var total = 0L
         for ((uid, bytes) in perUid) {
             total += bytes
             var pkg = ""
             var name = "Système Android"
-            if (uid != Process.SYSTEM_UID && uid >= 0) {
-                val pkgs = pm.getPackagesForUid(uid)
-                if (pkgs != null && pkgs.isNotEmpty()) {
-                    pkg = pkgs[0]
-                    name = try {
-                        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-                    } catch (e: Exception) {
-                        pkg
-                    }
-                }
+            val pkgs = if (uid >= 0) pm.getPackagesForUid(uid) else null
+            if (uid != Process.SYSTEM_UID && pkgs != null && pkgs.isNotEmpty()) {
+                pkg = pkgs[0]
+                name = try { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() } catch (e: Exception) { pkg }
             }
-            val old = perApp[pkg]
-            perApp[pkg] = Pair(name, (old?.second ?: 0L) + bytes)
+            perApp[pkg] = Pair(name, (perApp[pkg]?.second ?: 0L) + bytes)
         }
-
-        val sorted = perApp.entries
-            .filter { it.value.second >= 100_000L }
-            .sortedByDescending { it.value.second }
-            .take(15)
-
-        val array = JSONArray()
-        for (e in sorted) {
-            val obj = JSONObject()
-            obj.put("pkg", e.key)
-            obj.put("name", e.value.first)
-            obj.put("mb", Math.round(e.value.second / 100_00
+        val arr = JSONArray()
+        val top = perApp.entries.filter { it.value.second >= 100000L }.sortedByDescending { it.value.second }.take(15)
+        for (e in top) {
+            val o = JSONObject()
+            o.put("pkg", e.key)
+            o.put("name", e.value.first)
+            o.put("mb", Math.round(e.value.second / 100000.0) / 10.0)
+            arr.put(o)
+        }
+        return JSONObject().put("access", true).put("totalMb", Math.round(total / 100000.0) / 10.0).put("apps", arr).toString()
+    }
+}
